@@ -1,2 +1,4 @@
 build/
 .gradle/
+# Local AI runtime state
+.atl/
