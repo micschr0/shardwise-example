@@ -22,17 +22,28 @@ Node 3 of 4    payments, inventory, pricing
 Node 4 of 4    bench-support, newcomer, notifications, common-kotlin
 ```
 
-Measured locally, `--no-build-cache`, no daemon:
+Measured locally — cold `build/`, warm Gradle home, `--no-build-cache`, no daemon:
 
-| | test-task time |
-|---|---|
-| One runner, all twelve modules | **91.5 s** |
-| Four runners, slowest node (node 2) | **27.0 s** |
+| | wall clock | of which test tasks |
+|---|---|---|
+| One runner, all twelve modules | **179 s** | 91.5 s |
+| Four runners, slowest node | **99 s** | 25–27 s |
 
-Not four times faster on four runners, and it never will be: `catalog` alone
-takes 25.8 s and a module cannot be split. That is the floor, and it is worth
-knowing before you pay for a fifth runner. `./gradlew shardwiseAnalyze` reports
-the imbalance behind it — 3.05x here, with `catalog` holding 30.4% of the total.
+**1.8x on four runners.** Not 4x, and the gap between those two columns is why.
+
+Roughly 75 seconds of every run is fixed cost: starting Gradle, building `buildSrc`,
+compiling all twelve modules. Shardwise skips the `test` task, not the tasks it
+depends on, so each node still compiles the whole build. That overhead is paid
+four times over and no scheduler can divide it.
+
+The test work itself divides nearly perfectly — 91.5 s across four nodes lands at
+25–27 s each. What it cannot go below is `catalog`, which takes 25.8 s on its own
+and cannot be split. That is the floor, and it is worth knowing before paying for
+a fifth runner. `./gradlew shardwiseAnalyze` reports the imbalance behind it:
+3.05x, with `catalog` holding 30.4% of the total.
+
+So the honest rule: sharding pays when your test time is large next to your
+compile time. Measure both before buying runners.
 
 ---
 
