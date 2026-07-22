@@ -1,0 +1,73 @@
+name: Refresh test weights
+
+# A stale weights file does not break the build — modules just get packed by
+# outdated numbers and the nodes drift apart again. So refresh it on a schedule
+# and let a pull request carry the change, rather than trusting anyone to
+# remember. This is the part people usually leave out.
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Measure the suite and open a PR if the weights moved
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      # Unsharded and uncached on purpose: every module must actually execute,
+      # and a cached test task reports no duration to measure.
+      - name: Run the full suite
+        run: ./gradlew test --no-build-cache
+
+      - name: Aggregate timings into test-weights.properties
+        run: ./gradlew generateTestWeights
+
+      - name: Open a pull request if the weights moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The generated file carries a timestamp comment, so a plain `git diff`
+          # is never empty. Compare the measurements only.
+          measurements() { grep -v '^#' "$1" | sort; }
+          git show HEAD:test-weights.properties > /tmp/weights-before.properties
+          if diff -q <(measurements /tmp/weights-before.properties) \
+                     <(measurements test-weights.properties) > /dev/null; then
+            echo "Measurements unchanged, nothing to do."
+            exit 0
+          fi
+          branch="chore/refresh-test-weights-${GITHUB_RUN_ID}"
+          git switch -c "$branch"
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m 'chore: refresh test weights' -- test-weights.properties
+          # Credentials are not persisted in .git/config; push with a one-shot URL.
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" \
+            "HEAD:refs/heads/${branch}"
+          gh pr create \
+            --head "$branch" \
+            --title 'chore: refresh test weights' \
+            --body 'Measured on a scheduled unsharded run. Review the diff: a module whose weight moved a lot usually means its test suite changed shape.'

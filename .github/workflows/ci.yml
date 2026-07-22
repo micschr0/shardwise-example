@@ -1,0 +1,75 @@
+name: CI
+
+# Two jobs on purpose. `baseline` runs the whole suite on one runner, `sharded`
+# runs it across four. Compare their durations in the Actions UI — that side by
+# side comparison is the entire point of this repository.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline:
+    name: baseline (1 runner, unsharded)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      # No CI_NODE_* variables set, so the plugin stays out of the way entirely.
+      - run: ./gradlew test
+
+  sharded:
+    name: sharded (node ${{ matrix.node }} of 4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # Without this a red node hides whether the others were balanced.
+      fail-fast: false
+      matrix:
+        node: [1, 2, 3, 4]
+    env:
+      CI_NODE_INDEX: ${{ matrix.node }}
+      CI_NODE_TOTAL: '4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      # Identical command on every node. The two environment variables above are
+      # the whole integration; the plugin prints the plan it derived from them.
+      - run: ./gradlew test
+
+      # Each node only produces reports for the modules it ran. Download all four
+      # artifacts to reconstruct a full suite report.
+      - name: Upload this node's test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-reports-node-${{ matrix.node }}
+          path: '**/build/reports/tests/test'
+          if-no-files-found: error
