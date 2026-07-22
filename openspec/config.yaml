@@ -1,0 +1,41 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Gradle 9.6.1 multi-module build, Java 17 toolchain, one Kotlin module,
+    JUnit 5, buildSrc convention plugin, GitHub Actions.
+  Architecture: Twelve modules with deliberately unbalanced test durations. A single
+    convention plugin (buildSrc/bench-module.gradle.kts) configures every test module;
+    module build files stay one line. bench-support holds the CPU workload and has no
+    tests of its own.
+  Testing: Test duration IS the subject under demonstration. Tests burn chained SHA-256
+    rounds via bench-support Workload, never Thread.sleep, and assert only that the
+    digest came back intact.
+  Style: This repository is a demonstration, not an application. A file earns its place
+    by making the sharding behaviour clearer. Domain names are decoration; there is no
+    application beneath them.
+
+rules:
+  proposal:
+    - State which demonstration the change serves, or why an existing one is wrong
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Every requirement MUST be checkable by a command a reader can run
+  design:
+    - Document architecture decisions with rationale
+    - Justify any dependency added beyond the Gradle and JUnit baseline
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns
+      - Re-measure test-weights.properties after any change to a test workload
+    tdd: false
+    test_command: "./gradlew test --no-build-cache --no-daemon"
+  verify:
+    test_command: "./gradlew test --no-build-cache --no-daemon"
+    build_command: "actionlint .github/workflows/*.yml"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
