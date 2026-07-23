@@ -69,6 +69,27 @@ works on module paths and does not care.
 
 ---
 
+## The failure that must be loud
+
+The dangerous failure mode of a sharding tool is not a slow build — it is a build
+that silently runs *nothing* while CI reports green. A misconfigured node index has
+to abort, not shrug.
+
+The [`fail-closed`](.github/workflows/ci.yml) job proves it. It sets
+`CI_NODE_INDEX=5` against `CI_NODE_TOTAL=4` — a node that does not exist — and the
+job passes *only when the build fails*:
+
+```text
+> CI_NODE_INDEX=5 is out of range 1..4. Shardwise expects 1-based node indices;
+  for 0-based CI providers (CircleCI, Buildkite) map the index with +1.
+```
+
+The rejection happens at configuration time, before a single test compiles. A green
+check on this job is the guarantee that a broken CI environment can never quietly
+skip your tests.
+
+---
+
 ## The weights file goes stale, so refresh it on a schedule
 
 `test-weights.properties` holds measured milliseconds per module. It is only as

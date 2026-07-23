@@ -133,3 +133,44 @@ jobs:
           name: test-reports-node-${{ matrix.node }}
           path: '**/build/reports/tests/test'
           if-no-files-found: error
+
+  # The negative case, and the one that matters most. A sharding tool whose real
+  # failure mode is running *nothing* while CI stays green is worse than no tool.
+  # So prove the opposite: a broken CI_NODE_* environment must abort the build,
+  # loudly, before any test runs. This job is green only when the build fails.
+  # --dry-run is enough — the plugin rejects the environment at configuration
+  # time, so there is nothing to compile.
+  fail-closed:
+    name: fail-closed (invalid shard env aborts the build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # Node 5 of 4 does not exist. The plugin must refuse it rather than
+      # silently plan an empty shard.
+      CI_NODE_INDEX: '5'
+      CI_NODE_TOTAL: '4'
+    steps:
+      - uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      - name: An out-of-range node index must fail the build
+        run: |
+          if ./gradlew test --dry-run; then
+            echo "::error::CI_NODE_INDEX=5 of 4 was accepted — the plugin planned a shard it should have refused."
+            exit 1
+          fi
+          echo "Build aborted as required for an out-of-range shard index."
