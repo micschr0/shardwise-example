@@ -1,0 +1,4 @@
+rules:
+  stale-action-refs:
+    ignore:
+      - codeql.yml # codeql-action v3 SHAs are the only immutable ref for CodeQL
