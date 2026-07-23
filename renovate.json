@@ -1,0 +1,41 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices", ":semanticCommits"],
+  "prCreation": "immediate",
+  "labels": ["dependencies"],
+  "dependencyDashboard": true,
+  "configMigration": false,
+  "platformAutomerge": true,
+  "timezone": "Europe/Berlin",
+  "schedule": ["after 8am and before 6pm on Monday"],
+  "osvVulnerabilityAlerts": true,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true
+  },
+  "packageRules": [
+    {
+      "description": "This example exists to track the plugin — surface its releases, never automerge silently",
+      "matchPackageNames": ["de.micschro.shardwise{/,}**"],
+      "automerge": false,
+      "labels": ["dependencies", "shardwise-release"]
+    },
+    {
+      "description": "Group the Kotlin ecosystem into one PR",
+      "matchPackageNames": ["/^org\\.jetbrains\\.kotlin/"],
+      "groupName": "Kotlin"
+    },
+    {
+      "description": "Pin GitHub Actions to SHAs and keep them current (CI is the gate)",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "automerge": true,
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Major bumps always get a human",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ]
+}
