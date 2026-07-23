@@ -4,16 +4,23 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/micschr0/shardwise-example/badge)](https://securityscorecards.dev/viewer/?uri=github.com/micschr0/shardwise-example)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Twelve-module Gradle build wired to
-[Shardwise](https://github.com/micschr0/gradle-test-shard-plugin) — the plugin that packs
-your test tasks across CI runners by **measured duration**, not module count. This repo
-runs it for real so you can judge it before adopting it.
+**Slow test suite? Shardwise splits it across parallel CI runners** — packing modules by
+their **measured duration**, not module count, so a fast runner never sits idle next to a
+slow one. This is a twelve-module Gradle build running it for real, so you can judge it
+before adopting it.
 
-**Every push runs the same suite twice — one runner, then four — so the two wall-clock
-times sit side by side.** That comparison is the whole point.
+Every push runs the same suite twice — **one runner, then four** — so the two wall-clock
+times sit side by side. That comparison is the whole point.
 
 👉 [**See it in the latest green run**](https://github.com/micschr0/shardwise-example/actions/workflows/ci.yml?query=branch%3Amain+is%3Asuccess)
-— open `baseline` and any `sharded (node N of 4)` job; the duration is in each job header.
+— compare `baseline` (all tests, 1 runner) to any `sharded (node 1 of 4)` job; each job
+header shows its wall-clock time.
+
+**Jump to:** [the number](#the-one-number-that-decides-it) ·
+[why weight beats count](#why-weight-based-packing-beats-module-count) ·
+[fail-loud guarantee](#the-failure-that-must-be-loud) ·
+[copy it into your build](#copy-this-into-your-own-build) ·
+[try it locally](#try-it)
 
 ---
 
@@ -26,9 +33,10 @@ On GitHub-hosted runners, measured across real CI runs (they vary with runner lo
 | `baseline` — 1 runner, all 12 modules | **~120–190 s** |
 | `sharded` — slowest of 4 nodes | **~75–145 s** |
 
-Roughly **1.3–1.8×**. Locally, on a quiet machine: **179 s → 99 s = 1.8×**.
+Roughly **1.3–1.8×** (needs JDK 17; the Gradle wrapper is committed, nothing else to
+install). Locally, on a quiet machine: **179 s → 99 s = 1.8×**.
 
-Not 4×. **Here is exactly why** — and why knowing the reason matters more than the number:
+Not 4×. **Here is why — and the reason matters more than the number:**
 
 ```mermaid
 gantt
@@ -54,7 +62,7 @@ before buying runners.
 
 ---
 
-## Why measured weight beats module count
+## Why weight-based packing beats module count
 
 The planner packs by real milliseconds (Greedy-LPT bin-packing), so heavy modules get
 isolated instead of stacked. This is the actual distribution from CI:
@@ -181,11 +189,27 @@ gains nothing here. The domain names are decoration; there is no application und
 ```bash
 git clone https://github.com/micschr0/shardwise-example
 cd shardwise-example
-CI_NODE_INDEX=1 CI_NODE_TOTAL=4 ./gradlew test   # run node 1's shard
+CI_NODE_INDEX=1 CI_NODE_TOTAL=4 ./gradlew test   # node 1 runs only catalog
 ```
 
-Or just [**open the latest CI run**](https://github.com/micschr0/shardwise-example/actions/workflows/ci.yml?query=branch%3Amain+is%3Asuccess)
-and read the two durations. That is the whole pitch.
+One shard on your laptop runs a *subset* — node 1 is just `catalog` (~25 s of test work),
+the other eleven modules show `SKIPPED`. That proves the split works, but the **speedup is
+a comparison**, and your laptop is one machine, not four. To see it on one machine, time
+the baseline against the slowest shard:
+
+```bash
+time ./gradlew test --no-build-cache                              # baseline: all 12 modules
+for n in 1 2 3 4; do
+  time CI_NODE_INDEX=$n CI_NODE_TOTAL=4 ./gradlew test --no-build-cache
+done                                                             # slowest of these ≈ your sharded wall-clock
+```
+
+Confirm the guarantees while you are there: every module lands on exactly one node (no
+silent skip), and an out-of-range index fails loudly —
+`CI_NODE_INDEX=99 CI_NODE_TOTAL=4 ./gradlew test` must abort, not run nothing.
+
+Or skip all of it and [**open the latest CI run**](https://github.com/micschr0/shardwise-example/actions/workflows/ci.yml?query=branch%3Amain+is%3Asuccess)
+— the two durations are right there in the job headers. That is the whole pitch.
 
 ## License
 
