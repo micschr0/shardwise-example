@@ -1,133 +1,133 @@
 # Shardwise, in a build you can actually run
 
+[![CI](https://github.com/micschr0/shardwise-example/actions/workflows/ci.yml/badge.svg)](https://github.com/micschr0/shardwise-example/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/micschr0/shardwise-example/badge)](https://securityscorecards.dev/viewer/?uri=github.com/micschr0/shardwise-example)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 Twelve-module Gradle build wired to
-[Shardwise](https://github.com/micschr0/gradle-test-shard-plugin). See runtime-balanced
-test sharding work before deciding whether you want it.
+[Shardwise](https://github.com/micschr0/gradle-test-shard-plugin) — the plugin that packs
+your test tasks across CI runners by **measured duration**, not module count. This repo
+runs it for real so you can judge it before adopting it.
 
-Every CI run does the same suite twice — one runner, then four. **Open the latest run
-in the Actions tab, compare the two durations.** That comparison is the whole point.
+**Every push runs the same suite twice — one runner, then four — so the two wall-clock
+times sit side by side.** That comparison is the whole point.
 
-```mermaid
-flowchart LR
-    S["./gradlew test"] --> B["baseline<br/>1 runner · all 12 modules"]
-    S --> M["sharded<br/>4 runners · same command"]
-    B --> R["compare durations<br/>in Actions UI"]
-    M --> R
-```
+👉 [**See it in the latest green run**](https://github.com/micschr0/shardwise-example/actions/workflows/ci.yml?query=branch%3Amain+is%3Asuccess)
+— open `baseline` and any `sharded (node N of 4)` job; the duration is in each job header.
 
 ---
 
-## What the plan looks like
+## The one number that decides it
 
-Same command every node. Two env vars differ. Each node prints what it runs.
-This is the real distribution from CI — weight-balanced, not count-balanced:
+On GitHub-hosted runners, measured across real CI runs (they vary with runner load):
 
-```mermaid
-flowchart TB
-    W["test-weights.properties<br/>measured ms per module"] --> P{{"Greedy-LPT<br/>bin-packing"}}
-    P --> N1["Node 1<br/><b>catalog</b> — 25.8s"]
-    P --> N2["Node 2<br/>orders · reporting<br/>search · shipping"]
-    P --> N3["Node 3<br/>inventory · payments<br/>pricing"]
-    P --> N4["Node 4<br/>common-kotlin · newcomer<br/>notifications"]
-```
+| | wall clock |
+|---|---|
+| `baseline` — 1 runner, all 12 modules | **~120–190 s** |
+| `sharded` — slowest of 4 nodes | **~75–145 s** |
 
-`catalog` alone on node 1 — one heavy module, no cheap padding beside it. Rest packed
-to match. Count-based splitting would idle node 1 half the build.
+Roughly **1.3–1.8×**. Locally, on a quiet machine: **179 s → 99 s = 1.8×**.
 
-Measured locally — cold `build/`, warm Gradle home, `--no-build-cache`, no daemon:
-
-| | wall clock | of which test tasks |
-|---|---|---|
-| One runner, all twelve modules | **179 s** | 91.5 s |
-| Four runners, slowest node | **99 s** | 25–27 s |
-
-**1.8x on four runners.** Not 4x. Gap between those columns = fixed cost:
+Not 4×. **Here is exactly why** — and why knowing the reason matters more than the number:
 
 ```mermaid
-flowchart LR
-    subgraph one["One runner — 179s"]
-        F1["fixed ~75s<br/>Gradle + buildSrc<br/>+ compile all 12"] --> T1["test work<br/>91.5s"]
-    end
-    subgraph four["Four runners — slowest 99s"]
-        F2["fixed ~75s<br/><i>paid on every node</i>"] --> T2["test work<br/>25–27s"]
-    end
+gantt
+    title Where the wall-clock goes (mm:ss)
+    dateFormat X
+    axisFormat %M:%S
+    todayMarker off
+    section 1 runner
+    fixed ~75s (Gradle + compile all 12)  :done, 0, 75
+    test work 91.5s                       :active, 75, 167
+    section 4 runners (slowest node)
+    fixed ~75s — paid on every node       :done, 0, 75
+    test work 25s                         :active, 75, 100
 ```
 
-~75s fixed every run: start Gradle, build `buildSrc`, compile all twelve. Shardwise skips
-the `test` task, not its dependencies. Every node still compiles the whole build. No
-scheduler divides that.
+Both grey bars are the same length. **That fixed ~75 s — starting Gradle, building
+`buildSrc`, compiling all twelve modules — is paid on every node and no scheduler can
+divide it.** Shardwise skips the `test` task, not the tasks it depends on.
 
-Test work divides near-perfect — 91.5s across four nodes lands 25–27s each. Floor is
-`catalog`: 25.8s, cannot split. `./gradlew shardwiseAnalyze` reports the imbalance —
-**3.05x**, `catalog` holds **30.4%** of the total.
-
-**Honest rule:** sharding pays when test time is large next to compile time. Measure both
+Only the test work shrinks: 91.5 s → 25 s across four nodes. **The honest rule:
+sharding pays when your test time is large next to your compile time.** Measure both
 before buying runners.
 
 ---
 
-## Four situations this repo shows
+## Why measured weight beats module count
 
-| Situation | Module | What it proves |
-|---|---|---|
-| **One module dominates** | `catalog` | 30% of the suite alone. Weight-split puts it solo on node 1; count-split would pad it with cheap modules and idle the node. |
-| **Unknown module** | `newcomer` | Absent from the weights file (stands for the module added after the last refresh). Still planned onto node 4 via `defaultWeight`. |
-| **No tests at all** | `bench-support` | No `test` task. Appears in the plan, costs nothing. Nothing to configure. |
-| **Mixed languages** | `common-kotlin` | Kotlin, rest is Java. Planner works on module paths, does not care. |
+The planner packs by real milliseconds (Greedy-LPT bin-packing), so heavy modules get
+isolated instead of stacked. This is the actual distribution from CI:
 
-Coverage beats balance. Worst failure of a sharding tool is not a slow build — it is a
-module that runs on **zero** nodes while CI shows green. `newcomer` never vanishes.
+```mermaid
+xychart-beta
+    title "Weight packed per node (ms) — near-flat is the win"
+    x-axis ["node 1", "node 2", "node 3", "node 4"]
+    y-axis "packed weight (ms)" 0 --> 28000
+    bar [25768, 27047, 25073, 16740]
+```
+
+`catalog` (25.8 s, ~30 % of all test time) sits **alone** on node 1. Three nodes land
+within noise of each other. Split by module *count* instead and node 1 gets `catalog`
+plus two cheap modules — idle runners everywhere else while node 1 carries the build.
 
 ---
 
 ## The failure that must be loud
 
-Dangerous failure mode is not slow — it is a build that silently runs **nothing** while
-CI reports green. A misconfigured node index must abort, not shrug.
+The dangerous failure mode of a sharding tool is not a slow build — it is a build that
+silently runs **nothing** while CI reports green. A misconfigured node index has to
+**abort**, not shrug.
 
-```mermaid
-flowchart LR
-    E["CI_NODE_INDEX=5<br/>CI_NODE_TOTAL=4"] --> C{{"Shardwise<br/>validates env"}}
-    C -->|node 5 of 4<br/>does not exist| X["build ABORTS<br/>at config time"]
-    X --> G["fail-closed job<br/>goes GREEN"]
-```
-
-The [`fail-closed`](.github/workflows/ci.yml) job sets `CI_NODE_INDEX=5` against
-`CI_NODE_TOTAL=4` — a node that does not exist. Passes **only when the build fails**:
+The [`fail-closed`](.github/workflows/ci.yml) job proves it: it sets `CI_NODE_INDEX=5`
+against `CI_NODE_TOTAL=4` — a node that does not exist — and **passes only when the build
+fails**, at configuration time, before a single test compiles.
 
 ```text
 > CI_NODE_INDEX=5 is out of range 1..4. Shardwise expects 1-based node indices;
   for 0-based CI providers (CircleCI, Buildkite) map the index with +1.
 ```
 
-Rejection happens at configuration time, before a test compiles. Green check here =
-a broken CI environment can never quietly skip your tests.
+A green check on that job is the guarantee a broken CI environment can never quietly skip
+your tests.
+
+---
+
+## Four things this repo puts under test
+
+| Situation | Module | What it proves |
+|---|---|---|
+| **One module dominates** | `catalog` | 30 % of the suite alone → weight-split isolates it on node 1; count-split would pad it and idle the rest. |
+| **Unknown module** | `newcomer` | Absent from the weights file (the module added after the last refresh). Still planned via `defaultWeight` — never runs on zero nodes. |
+| **No tests at all** | `bench-support` | No `test` task. Appears in the plan, costs nothing, needs no config. |
+| **Mixed languages** | `common-kotlin` | Kotlin among Java. Planner works on module paths; does not care. |
+
+**Coverage beats balance** is the invariant behind all four: an unknown module, an unknown
+task name, a stale weight — all default to *running*, never to silently vanishing.
 
 ---
 
 ## Weights go stale — refresh on a schedule
 
-`test-weights.properties` holds measured milliseconds per module. Only as good as its
-last measurement. Nothing breaks when it rots — nodes just drift apart again.
+`test-weights.properties` is only as good as its last measurement. Nothing breaks when it
+rots; the nodes just drift apart again until you are back where you started.
 
 ```mermaid
 flowchart LR
-    CR["cron:<br/>weekly"] --> RUN["run suite unsharded<br/>--no-build-cache"]
+    CR["cron: weekly"] --> RUN["run suite unsharded<br/>--no-build-cache"]
     RUN --> GEN["generateTestWeights"]
     GEN --> D{{"measurements<br/>moved?"}}
-    D -->|yes| PR["open PR"]
+    D -->|yes| PR["open a PR"]
     D -->|no| SKIP["do nothing"]
 ```
 
-[`weights-refresh.yml`](.github/workflows/weights-refresh.yml) runs the suite unsharded
-weekly, opens a PR when numbers moved. Most integrations leave this out.
+[`weights-refresh.yml`](.github/workflows/weights-refresh.yml) does this weekly. Two
+details worth stealing:
 
-Two details worth stealing:
-
-- Measurement run needs `--no-build-cache`. Cached test task reports no duration — you
-  would commit a weights file full of zeroes.
-- Generated file carries a timestamp comment, so `git diff --quiet` is never empty.
-  Compare measurement lines only, or you open a no-op PR every week.
+- The measurement run needs `--no-build-cache` — a cached test task reports no duration
+  and you would commit a weights file full of zeroes.
+- The generated file carries a timestamp comment, so `git diff --quiet` is never empty.
+  Compare the measurement lines only, or you open a no-op PR every week.
 
 ---
 
@@ -135,7 +135,8 @@ Two details worth stealing:
 
 Three things. None touch your modules.
 
-**1. Apply the plugin to the root project:**
+**1. Apply the plugin to the root project** (version `0.4.1` — the latest on the Gradle
+Plugin Portal; bump only after confirming a newer one resolves):
 
 ```kotlin
 // build.gradle.kts
@@ -144,7 +145,8 @@ plugins {
 }
 ```
 
-**2. Measure once, commit the result:**
+**2. Measure once and commit the result** (re-run after a dependency bump or a test-shape
+change; the weekly refresh above keeps it honest between times):
 
 ```bash
 ./gradlew test --no-build-cache
@@ -159,25 +161,31 @@ env:
   CI_NODE_TOTAL: '4'
 ```
 
-That is the entire integration. Removing it = deleting the plugins line.
+That is the entire integration. Removing it is deleting the plugins line.
 
 ---
 
 ## About the workload
 
-Tests do real, deterministic CPU work — chained SHA-256 rounds in
-[`bench-support`](bench-support/src/main/java/bench/Workload.java), not `Thread.sleep`.
-Sleeping tasks cost no CPU; any scheduler looks good against them, so the numbers would
-be a lie.
-
-Durations are deliberately unbalanced — that is the situation Shardwise addresses. A
-suite where every module costs the same gains nothing here. Domain names are decoration;
-no application under them.
-
-`Workload.UNIT` is the calibration knob — one unit ≈ one second on a GitHub-hosted
-runner. On different hardware the whole suite scales with it.
+The tests do real, deterministic CPU work — chained SHA-256 rounds in
+[`bench-support`](bench-support/src/main/java/bench/Workload.java), never `Thread.sleep`.
+Sleeping tasks cost no CPU, so any scheduler looks good against them; the numbers would be
+a lie. Durations are deliberately unbalanced — a suite where every module costs the same
+gains nothing here. The domain names are decoration; there is no application under them.
+`Workload.UNIT` is the calibration knob: one unit ≈ one second on a GitHub-hosted runner.
 
 ---
+
+## Try it
+
+```bash
+git clone https://github.com/micschr0/shardwise-example
+cd shardwise-example
+CI_NODE_INDEX=1 CI_NODE_TOTAL=4 ./gradlew test   # run node 1's shard
+```
+
+Or just [**open the latest CI run**](https://github.com/micschr0/shardwise-example/actions/workflows/ci.yml?query=branch%3Amain+is%3Asuccess)
+and read the two durations. That is the whole pitch.
 
 ## License
 
