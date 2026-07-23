@@ -1,4 +1,6 @@
 build/
 .gradle/
+.gradle-cache/
 # Local AI runtime state
 .atl/
+.codegraph/

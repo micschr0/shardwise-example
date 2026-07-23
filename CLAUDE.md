@@ -30,6 +30,8 @@ product but adds nothing here is noise.
 - ALWAYS use conventional commit messages (`type: subject`)
 - ALWAYS pin GitHub Actions to a full commit SHA with the version in a trailing comment
 - ALWAYS set `persist-credentials: false` on `actions/checkout`
+- ALWAYS declare `permissions: {}` at workflow top level and re-grant per job
+- ALWAYS make `step-security/harden-runner` (egress-policy: audit) the first step of every job
 - ALWAYS re-measure and update `test-weights.properties` after changing any test's workload
 - ALWAYS keep every module listed in `settings.gradle.kts` reachable by exactly one node
   in a four-node plan — verify with the plan dump below
@@ -114,8 +116,11 @@ needs more than that is either a new demonstration — document it — or scope 
 
 ## Known Gaps
 
-- The plugin id `de.micschro.shardwise` does not resolve from the Gradle Plugin Portal
-  (404 on `maven-metadata.xml`), so CI here cannot be green yet. `README.md` and
-  `build.gradle.kts` pin `0.4.1`; confirm the published version before pushing.
+- `README.md` and `build.gradle.kts` pin `0.4.1` — the latest version actually resolvable
+  from the Gradle Plugin Portal. Later tags may exist on GitHub before they reach the
+  Portal; confirm the pin resolves (`maven-metadata.xml` is public) before bumping.
+- `renovate.yml` needs a GitHub App installed on this repo with the
+  `RENOVATE_APP_ID` / `RENOVATE_PRIVATE_KEY` secrets set. Without them that workflow
+  fails at the token step; the rest of CI is unaffected.
 - No aggregation of the four nodes' test reports into one view. Each node uploads its own
   artifact. Worth adding only if someone asks for it.
